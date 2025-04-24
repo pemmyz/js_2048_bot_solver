@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // ----------------- Settings ------------------
+    // ... (Keep all existing constants and DOM element selections) ...
     const GRID_SIZE = 4;
     const TILE_SIZE = 100;
     const TILE_MARGIN = 10;
@@ -78,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let historyMaxScroll = 0;
     let draggingScrollbar = false;
     let scrollbarDragOffsetY = 0;
+    let isPaused = false; // <-- NEW: Pause state for bot
 
     const botAlgorithms = [
         "random", "greedy", /* "expectimax", "mcts", */ // Commented out for brevity/performance
@@ -101,17 +102,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // --- Deep Copy Helper ---
-    // Use structuredClone if available, otherwise fallback (basic JSON method)
     function deepCopy(obj) {
         if (typeof structuredClone === 'function') {
             return structuredClone(obj);
         } else {
-            // Basic fallback, works for simple data like the game state
             try {
                 return JSON.parse(JSON.stringify(obj));
             } catch (e) {
                 console.error("Deep copy failed. Consider a more robust polyfill if needed.", e);
-                // Fallback to shallow copy might cause bugs
                 return { ...obj, board: obj.board ? obj.board.map(row => [...row]) : [] };
             }
         }
@@ -123,12 +121,14 @@ document.addEventListener('DOMContentLoaded', () => {
         board = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
         score = 0;
         gameOver = false;
+        isPaused = false; // <-- NEW: Reset pause on game reset
         addRandomTile();
         addRandomTile();
         history = [{ board: deepCopy(board), score: score, gameOver: gameOver }];
         selectedHistoryIndex = 0;
         branchPoint = null;
         historyScrollOffset = 0;
+        scrollToHistoryBottom(); // <-- NEW: Ensure scroll is at bottom on reset
         updateUI();
         drawGame();
         console.log("Game Reset");
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gameOver) return false;
 
         let boardBefore = deepCopy(board);
-        let scoreBefore = score;
+        // scoreBefore not needed as score is global
         let moved = false;
 
         switch (direction) {
@@ -184,32 +184,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (boardChanged) {
              addRandomTile();
-            // Check for game over only if a move resulted in a change
             if (!canMoveCheck()) {
                 gameOver = true;
                 console.log("Game Over!");
             }
-            // Update history only if a move was made and the game isn't actively on an old history state
-             if (selectedHistoryIndex === history.length - 1) {
-                 // If we were at the latest state, just append
+
+            // Update history
+            if (selectedHistoryIndex === history.length - 1) {
                  history.push({ board: deepCopy(board), score: score, gameOver: gameOver });
                  selectedHistoryIndex++;
-                 branchPoint = null; // New move from latest state cancels branching
+                 branchPoint = null;
              } else {
-                 // If we moved from an older state, this creates a branch
-                 branchPoint = selectedHistoryIndex + 1; // Mark the *new* move as the branch start
-                 history = history.slice(0, selectedHistoryIndex + 1); // Truncate future history
+                 branchPoint = selectedHistoryIndex + 1;
+                 history = history.slice(0, selectedHistoryIndex + 1);
                  history.push({ board: deepCopy(board), score: score, gameOver: gameOver });
-                 selectedHistoryIndex = history.length - 1; // Select the new state
+                 selectedHistoryIndex = history.length - 1;
                  console.log(`Branched history at move ${branchPoint}`);
              }
-             updateUI(); // Update score, status, history panel
+             scrollToHistoryBottom(); // <-- NEW: Auto-scroll after new move
+             updateUI();
         } else {
-            // If no tiles moved, but the game might have ended (e.g., trying a move on a full, static board)
              if (!canMoveCheck()) {
                  gameOver = true;
                   console.log("Game Over! (No valid moves)");
-                   // Update the last history state's game over status if necessary
                  if (history.length > 0) {
                      history[history.length - 1].gameOver = true;
                  }
@@ -217,12 +214,12 @@ document.addEventListener('DOMContentLoaded', () => {
              }
         }
 
-
-        return boardChanged; // Return if the board state actually changed
+        return boardChanged;
     }
 
 
-    // --- Movement Helpers ---
+    // --- Movement Helpers (compress, merge, operateRow, moveLeft, moveRight, moveUp, moveDown) ---
+    // ... (Keep these functions exactly as they were) ...
     function compress(row) {
         let newRow = row.filter(num => num !== 0);
         while (newRow.length < GRID_SIZE) {
@@ -239,7 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 score += row[i]; // Update global score
                 row[i + 1] = 0;
                 merged = true;
-                // i++; // Skip the next tile as it's now 0
+                // i++; // Skip the next tile as it's now 0 - Re-evaluating this, might allow chain merges unintendedly? Let's keep it commented.
             }
         }
         return { row, merged };
@@ -254,7 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let changed = JSON.stringify(originalRow) !== JSON.stringify(row);
         return { row, changed: changed || mergeResult.merged }; // Also changed if merged
     }
-
 
     function moveLeft() {
         let changedOverall = false;
@@ -286,12 +282,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             let result = operateRow(col);
             for (let r = 0; r < GRID_SIZE; r++) {
-                 if(board[r][c] !== result.row[r]) { // Check column change specifically
-                    //changedOverall = true; //This isn't sufficient if only merge happened without position change
-                 }
                 board[r][c] = result.row[r];
             }
-             changedOverall = changedOverall || result.changed; // Use the operateRow changed status
+             changedOverall = changedOverall || result.changed;
         }
         return changedOverall;
     }
@@ -307,17 +300,16 @@ document.addEventListener('DOMContentLoaded', () => {
             let result = operateRow(reversedCol);
             let finalCol = result.row.reverse();
             for (let r = 0; r < GRID_SIZE; r++) {
-                 if(board[r][c] !== finalCol[r]) {
-                    // changedOverall = true;
-                 }
                 board[r][c] = finalCol[r];
             }
-             changedOverall = changedOverall || result.changed; // Use the operateRow changed status
+             changedOverall = changedOverall || result.changed;
         }
         return changedOverall;
     }
 
-    // --- Drawing ---
+
+    // --- Drawing (drawGame, drawTile, drawRoundedRect) ---
+    // ... (Keep these functions exactly as they were) ...
     function drawGame() {
         // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -365,7 +357,6 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillText(value.toString(), x + TILE_SIZE / 2, y + TILE_SIZE / 2);
     }
 
-    // Helper to draw rounded rectangles (basic version)
     function drawRoundedRect(ctx, x, y, width, height, radius) {
         if (typeof ctx.roundRect === 'function') {
             // Use native roundRect if available
@@ -393,20 +384,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- UI Updates ---
     function updateUI() {
         scoreArea.textContent = `Score: ${score}`;
-        statusLine1.textContent = `Mode: ${botMode ? 'Bot' : 'Manual'} | Algorithm: ${botAlgorithm}`;
+
+        // <-- NEW: Update status line 1 to include pause state -->
+        let botStatusText = botMode
+            ? `Bot (${isPaused ? 'Paused' : 'Running'})`
+            : 'Manual';
+        statusLine1.textContent = `Mode: ${botStatusText} | Algorithm: ${botAlgorithm}`;
+        // <-- End Update -->
 
         if (botAlgorithm === "combined") {
             const activeStrats = strategyOrder.filter(s => combinedBotStrategies[s].active);
             statusLine2.textContent = `Active: ${activeStrats.join(', ') || 'None'}`;
-            statusLine3.textContent = `(Use 1-5 to toggle)`;
+            statusLine3.textContent = `(Use 1-5 to toggle, P to pause)`;
         } else {
-             statusLine2.textContent = ''; // Clear extra lines if not combined mode
+             statusLine2.textContent = `(P to pause bot)`; // Show pause reminder here too
              statusLine3.textContent = '';
         }
 
         gameOverMessage.style.display = gameOver ? 'block' : 'none';
 
         if (showHistoryPanel) {
+            // History panel drawing might change scroll offset, so draw it first
             drawHistoryPanel();
              historyPanel.classList.remove('hidden');
              container.style.gap = '20px'; // Restore gap when panel is shown
@@ -414,10 +412,29 @@ document.addEventListener('DOMContentLoaded', () => {
             historyPanel.classList.add('hidden');
              container.style.gap = '0px'; // Remove gap when panel is hidden
         }
-
     }
 
     // --- History Panel Logic ---
+
+    // <-- NEW: Helper function to scroll history to bottom -->
+    function scrollToHistoryBottom() {
+        if (!showHistoryPanel) return; // Don't try to scroll if hidden
+
+        const panelHeight = historyEntriesContainer.clientHeight;
+        if (panelHeight <= 0) return; // Avoid calculation errors if panel isn't rendered yet
+
+        const totalContentHeight = history.length * ENTRY_HEIGHT;
+        historyMaxScroll = Math.max(0, totalContentHeight - panelHeight);
+        historyScrollOffset = historyMaxScroll;
+
+        // Redraw the panel to reflect the scroll change
+        // updateUI() calls drawHistoryPanel, so we can rely on that if called soon after,
+        // but calling directly ensures it happens if updateUI isn't immediately next.
+        drawHistoryPanel();
+    }
+    // <-- End Helper Function -->
+
+
     function getTopFourTiles(stateBoard) {
         const tiles = stateBoard.flat().filter(tile => tile !== 0);
         tiles.sort((a, b) => b - a); // Sort descending
@@ -427,44 +444,48 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawHistoryPanel() {
         historyEntriesContainer.innerHTML = ''; // Clear previous entries
         const panelHeight = historyEntriesContainer.clientHeight; // Visible height
+        if (panelHeight <= 0) return; // Can't draw if not visible/sized
+
         const totalContentHeight = history.length * ENTRY_HEIGHT; // Total height needed
 
+        // Ensure scroll offset is within valid bounds AFTER potential content changes
         historyMaxScroll = Math.max(0, totalContentHeight - panelHeight);
         historyScrollOffset = Math.max(0, Math.min(historyScrollOffset, historyMaxScroll));
 
-        // Calculate visible entry range
         const firstVisibleIndex = Math.floor(historyScrollOffset / ENTRY_HEIGHT);
         const lastVisibleIndex = Math.ceil((historyScrollOffset + panelHeight) / ENTRY_HEIGHT);
 
-
         history.forEach((state, idx) => {
-             // Only create DOM elements for potentially visible items + a buffer
-             if (idx >= firstVisibleIndex - 5 && idx <= lastVisibleIndex + 5) {
+             if (idx >= firstVisibleIndex - 5 && idx <= lastVisibleIndex + 5) { // Render buffer
                 const entry = document.createElement('div');
                 entry.classList.add('history-entry');
                 const topTiles = getTopFourTiles(state.board);
                 entry.textContent = `Move ${idx}: ${topTiles.join(', ')}`;
-                entry.dataset.index = idx; // Store index for click handling
+                entry.dataset.index = idx;
 
                 if (idx === selectedHistoryIndex) {
                     entry.classList.add('selected');
                 }
                  if (branchPoint !== null && idx === branchPoint) {
-                    entry.classList.add('branch-point'); // Add visual marker for branch start
+                    entry.classList.add('branch-point');
                  }
 
-                // Position the entry based on scroll offset
-                 entry.style.top = `${idx * ENTRY_HEIGHT - historyScrollOffset}px`;
-
+                entry.style.top = `${idx * ENTRY_HEIGHT - historyScrollOffset}px`;
 
                 entry.addEventListener('click', () => {
                     selectedHistoryIndex = idx;
-                    // Load state from history (use deep copy to prevent modifying history)
                     const selectedState = deepCopy(history[idx]);
                     board = selectedState.board;
                     score = selectedState.score;
-                    gameOver = selectedState.gameOver; // Restore game over state too
+                    gameOver = selectedState.gameOver;
                     console.log(`Selected history state ${idx}`);
+
+                    // <-- NEW: Scroll to bottom if the LAST item was clicked -->
+                    if (idx === history.length - 1) {
+                        scrollToHistoryBottom();
+                    }
+                    // <-- End New -->
+
                     updateUI(); // Update score display, status, and redraw history highlight
                     drawGame(); // Redraw board
                 });
@@ -473,9 +494,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Update scrollbar thumb
-        if (historyMaxScroll > 0) {
-            const thumbHeight = Math.max(20, (panelHeight / totalContentHeight) * panelHeight);
-            const thumbY = (historyScrollOffset / historyMaxScroll) * (panelHeight - thumbHeight);
+        if (historyMaxScroll > 0 && panelHeight > 0) {
+            const thumbHeightRatio = Math.min(1, panelHeight / totalContentHeight);
+            const thumbHeight = Math.max(20, thumbHeightRatio * panelHeight);
+            const trackHeight = panelHeight; // Scrollable area height
+            const thumbMaxY = trackHeight - thumbHeight;
+            const thumbY = (historyScrollOffset / historyMaxScroll) * thumbMaxY;
+
             scrollbarThumb.style.height = `${thumbHeight}px`;
             scrollbarThumb.style.top = `${thumbY}px`;
             scrollbarTrack.style.display = 'block';
@@ -484,7 +509,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Scrollbar drag handling
+    // Scrollbar drag handling (mousedown, mousemove, mouseup)
+    // ... (Keep these handlers exactly as they were) ...
      scrollbarThumb.addEventListener('mousedown', (e) => {
         draggingScrollbar = true;
         scrollbarDragOffsetY = e.clientY - scrollbarThumb.getBoundingClientRect().top;
@@ -495,17 +521,12 @@ document.addEventListener('DOMContentLoaded', () => {
      document.addEventListener('mousemove', (e) => {
         if (!draggingScrollbar) return;
         const trackRect = scrollbarTrack.getBoundingClientRect();
-        const panelRect = historyEntriesContainer.getBoundingClientRect(); // Use entries container for relative calc
         const thumbHeight = scrollbarThumb.offsetHeight;
 
-         // Calculate new thumb Y relative to the track's top
          let newThumbY = e.clientY - trackRect.top - scrollbarDragOffsetY;
-
-        // Clamp thumb position within the track
         newThumbY = Math.max(0, Math.min(newThumbY, trackRect.height - thumbHeight));
 
-         // Calculate scroll offset based on thumb position
-         if (trackRect.height - thumbHeight > 0) { // Avoid division by zero
+         if (trackRect.height - thumbHeight > 0) {
             historyScrollOffset = (newThumbY / (trackRect.height - thumbHeight)) * historyMaxScroll;
          } else {
             historyScrollOffset = 0;
@@ -524,15 +545,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mouse wheel scrolling for history panel
      historyPanel.addEventListener('wheel', (e) => {
+        if (!showHistoryPanel) return; // Ignore if panel hidden
         e.preventDefault(); // Prevent page scrolling
         const scrollAmount = 30; // Pixels per wheel step
         historyScrollOffset += e.deltaY > 0 ? scrollAmount : -scrollAmount;
-        historyScrollOffset = Math.max(0, Math.min(historyScrollOffset, historyMaxScroll));
+        // Bounds check handled within drawHistoryPanel
         drawHistoryPanel();
     });
 
-    // --- Bot Logic ---
-
+    // --- Bot Logic (getValidMoves, botRandomMove, botGreedyMove, etc.) ---
+    // --- Evaluation Functions (evalEmpty, evalCorner, etc.) ---
+    // ... (Keep all bot logic and evaluation functions exactly as they were) ...
     // Helper: Get valid moves for a given game state
     function getValidMoves(currentBoard, currentScore) {
         const moves = [];
@@ -552,7 +575,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case RIGHT: moved = moveRight(); break;
                 case UP: moved = moveUp(); break;
                 case DOWN: moved = moveDown(); break;
-            }
+             }
              let boardChanged = JSON.stringify(boardBefore) !== JSON.stringify(board);
 
              if (boardChanged) {
@@ -649,14 +672,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let bestCornerScore = -Infinity;
 
         for (const corner of corners) {
-             // Simple distance heuristic (Manhattan distance)
-             // We want the max tile in a corner, so reward proximity
-             // Also weight by the max tile value itself?
              let dist = Math.abs(corner.r - pos.r) + Math.abs(corner.c - pos.c);
              let cornerScore = (GRID_SIZE * 2 - dist) * (value || 1); // Reward proximity and value
              bestCornerScore = Math.max(bestCornerScore, cornerScore);
         }
-         // Additional check: Is the max value *actually* in a corner? Big bonus.
         if (corners.some(c => c.r === pos.r && c.c === pos.c)) {
             bestCornerScore += value * 2; // Extra points for being in the corner
         }
@@ -666,7 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function evalMonotonicity(currentBoard) {
         let score = 0;
-        // Check rows (left-to-right and right-to-left)
+        // Rows
         for (let r = 0; r < GRID_SIZE; r++) {
             let current = 0; let next = current + 1; let diff = 0;
             while (next < GRID_SIZE) {
@@ -675,12 +694,12 @@ document.addEventListener('DOMContentLoaded', () => {
                  let currentVal = currentBoard[r][current] === 0 ? 0 : Math.log2(currentBoard[r][current]);
                  let nextVal = currentBoard[r][next] === 0 ? 0 : Math.log2(currentBoard[r][next]);
                  if (diff === 0) diff = nextVal - currentVal;
-                 else if ((nextVal - currentVal) * diff < 0) { diff = -Infinity; break; } // Direction changed
+                 else if ((nextVal - currentVal) * diff < 0) { diff = -Infinity; break; }
                  current = next++;
              }
-             if (diff !== -Infinity) score += Math.abs(diff); // Reward consistent direction
+             if (diff !== -Infinity) score += Math.abs(diff);
         }
-         // Check columns (top-to-bottom and bottom-to-top) - Similar logic
+         // Columns
         for (let c = 0; c < GRID_SIZE; c++) {
             let current = 0; let next = current + 1; let diff = 0;
             while (next < GRID_SIZE) {
@@ -703,11 +722,11 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let c = 0; c < GRID_SIZE; c++) {
                 if (currentBoard[r][c] !== 0) {
                     let value = Math.log2(currentBoard[r][c]);
-                    // Check right neighbor
+                    // Right
                     if (c < GRID_SIZE - 1 && currentBoard[r][c + 1] !== 0) {
                         smoothness -= Math.abs(value - Math.log2(currentBoard[r][c + 1]));
                     }
-                     // Check down neighbor
+                     // Down
                      if (r < GRID_SIZE - 1 && currentBoard[r + 1][c] !== 0) {
                          smoothness -= Math.abs(value - Math.log2(currentBoard[r + 1][c]));
                      }
@@ -722,19 +741,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function evalRemoveSmall(currentBoard) {
-        // We want to *minimize* small tiles, so return the negative count
         return -countSmallTiles(currentBoard, 8);
     }
 
-     // Bot: Simple Heuristic (based on eval functions)
      function botHeuristicMove() {
          let bestMove = null;
          let bestValue = -Infinity;
-          const originalBoard = deepCopy(board); // Backup
+          const originalBoard = deepCopy(board);
          const originalScore = score;
 
          for (const direction of [UP, DOWN, LEFT, RIGHT]) {
-             // Simulate move on a copy
              board = deepCopy(originalBoard);
              score = originalScore;
              let boardBefore = deepCopy(board);
@@ -748,11 +764,8 @@ document.addEventListener('DOMContentLoaded', () => {
              let boardChanged = JSON.stringify(boardBefore) !== JSON.stringify(board);
 
               if (boardChanged) {
-                 // Evaluate the resulting board state
-                 // Simple heuristic: combine empty cells and max tile value
                  let empty = evalEmpty(board);
                  let maxTileData = evalGetMaxTile(board);
-                  // Normalize maxTile roughly, give more weight to empty cells initially
                  let value = empty * 2 + (maxTileData.value > 0 ? Math.log2(maxTileData.value) : 0);
                  if (value > bestValue) {
                      bestValue = value;
@@ -760,21 +773,18 @@ document.addEventListener('DOMContentLoaded', () => {
                  }
              }
          }
-          // Restore original state
          board = originalBoard;
          score = originalScore;
-         return bestMove || botRandomMove(); // Fallback
+         return bestMove || botRandomMove();
      }
 
-      // Bot: Remove Small Tiles Focus
      function botRemoveSmallMove() {
          let bestMove = null;
-         let bestSmallCount = Infinity; // Minimize small tiles
-         const originalBoard = deepCopy(board); // Backup
+         let bestSmallCount = Infinity;
+         const originalBoard = deepCopy(board);
          const originalScore = score;
 
          for (const direction of [UP, DOWN, LEFT, RIGHT]) {
-             // Simulate move on a copy
              board = deepCopy(originalBoard);
              score = originalScore;
              let boardBefore = deepCopy(board);
@@ -788,28 +798,25 @@ document.addEventListener('DOMContentLoaded', () => {
               let boardChanged = JSON.stringify(boardBefore) !== JSON.stringify(board);
 
               if (boardChanged) {
-                 let smallCount = countSmallTiles(board, 8); // Count tiles < 8
+                 let smallCount = countSmallTiles(board, 8);
                  if (smallCount < bestSmallCount) {
                      bestSmallCount = smallCount;
                      bestMove = direction;
                  }
              }
          }
-         // Restore original state
          board = originalBoard;
          score = originalScore;
-         return bestMove || botRandomMove(); // Fallback
+         return bestMove || botRandomMove();
      }
 
-    // Bot: Combined Heuristics
     function botCombinedMove() {
         let bestMove = null;
         let bestScore = -Infinity;
-        const originalBoard = deepCopy(board); // Backup
+        const originalBoard = deepCopy(board);
         const originalScore = score;
 
         for (const direction of [UP, DOWN, LEFT, RIGHT]) {
-            // Simulate move on a copy
             board = deepCopy(originalBoard);
             score = originalScore;
             let boardBefore = deepCopy(board);
@@ -823,36 +830,32 @@ document.addEventListener('DOMContentLoaded', () => {
              let boardChanged = JSON.stringify(boardBefore) !== JSON.stringify(board);
 
             if (boardChanged) {
-                let currentScore = 0;
-                // Use the defined strategy order implicitly via the object keys if needed,
-                // but better to iterate through the explicitly ordered/active list
+                let currentScoreValue = 0; // Renamed to avoid conflict with global score
                 for(const stratName of strategyOrder) {
                     const strat = combinedBotStrategies[stratName];
                     if (strat.active) {
-                         // Evaluate the board *after* the move
-                        currentScore += strat.weight * strat.func(board);
+                        currentScoreValue += strat.weight * strat.func(board);
                     }
                 }
 
-                 // Add current game score as a factor too?
-                 // currentScore += score / 10; // Optional: value score directly
-
-
-                if (currentScore > bestScore) {
-                    bestScore = currentScore;
+                if (currentScoreValue > bestScore) {
+                    bestScore = currentScoreValue;
                     bestMove = direction;
                 }
             }
         }
 
-         // Restore original state
-        board = originalBoard;
-        score = originalScore;
-        return bestMove || botRandomMove(); // Fallback if no move seems better
+         board = originalBoard;
+         score = originalScore;
+        return bestMove || botRandomMove();
     }
 
     // --- Bot Execution ---
     function executeBotMove() {
+        // <-- NEW: Check pause state -->
+        if (isPaused) return;
+        // <-- End Check -->
+
         if (!botMode || gameOver || performance.now() - lastBotMoveTime < botDelay) {
             return;
         }
@@ -864,25 +867,25 @@ document.addEventListener('DOMContentLoaded', () => {
             case "heuristic":    chosenMove = botHeuristicMove(); break;
             case "remove_small": chosenMove = botRemoveSmallMove(); break;
             case "combined":     chosenMove = botCombinedMove(); break;
-            // Add cases for expectimax, mcts if implemented
             default:             chosenMove = botRandomMove(); break;
         }
 
         if (chosenMove) {
             console.log(`Bot (${botAlgorithm}) moving: ${chosenMove}`);
-            move(chosenMove); // This function handles history and UI updates
-            drawGame();
+            move(chosenMove); // Handles history, UI updates, drawing internally now
+            // drawGame(); // drawGame is called within updateUI -> drawHistoryPanel -> ... No, move calls updateUI which calls drawHistoryPanel. Let's call drawGame explicitly after move if needed.
+             drawGame(); // Let's keep this explicit call for clarity after bot move.
         } else if (!canMoveCheck()) {
             gameOver = true;
              console.log("Bot found no valid moves. Game Over!");
-             updateUI(); // Ensure game over message shows
+             updateUI();
         }
         lastBotMoveTime = performance.now();
     }
 
     // --- Event Listeners ---
     document.addEventListener('keydown', (e) => {
-        if (!botMode && !gameOver) { // Only allow manual moves if not bot mode and game not over
+        if (!botMode && !gameOver) {
              let direction = null;
              switch (e.key) {
                  case 'ArrowUp':    direction = UP; break;
@@ -891,67 +894,76 @@ document.addEventListener('DOMContentLoaded', () => {
                  case 'ArrowRight': direction = RIGHT; break;
              }
              if (direction) {
-                 e.preventDefault(); // Prevent page scrolling
-                 if(move(direction)) { // move() returns true if board changed
-                     drawGame();
+                 e.preventDefault();
+                 if(move(direction)) {
+                     drawGame(); // Draw after successful manual move
                  };
              }
         }
 
         // Global controls
         switch (e.key.toLowerCase()) {
-            case 'r': // Reset
+            case 'r':
                  e.preventDefault();
                  resetGame();
                  break;
-            case 'b': // Toggle Bot mode
+            case 'b':
                  e.preventDefault();
                  botMode = !botMode;
-                 lastBotMoveTime = performance.now(); // Reset timer when toggling
+                 lastBotMoveTime = performance.now();
+                 if (!botMode) { // <-- NEW: Reset pause if turning bot OFF
+                    isPaused = false;
+                 }
                  console.log(`Bot Mode: ${botMode}`);
                  updateUI();
                  break;
-            case 'a': // Change Algorithm
+            case 'a':
                  e.preventDefault();
                  currentAlgorithmIndex = (currentAlgorithmIndex + 1) % botAlgorithms.length;
                  botAlgorithm = botAlgorithms[currentAlgorithmIndex];
                  console.log(`Bot Algorithm: ${botAlgorithm}`);
                  updateUI();
                  break;
-             case 'h': // Toggle History Panel
+             case 'h':
                  e.preventDefault();
                  showHistoryPanel = !showHistoryPanel;
-                 updateUI(); // This function now handles showing/hiding the panel
+                 if(showHistoryPanel) { // If showing, ensure scroll is potentially recalculated/redrawn
+                     drawHistoryPanel(); // Explicit redraw when shown
+                 }
+                 updateUI();
                  break;
-             case 'u': // Undo (only works manually after game over in original logic, keep?)
-                 // Simple undo: Go back one step in history (if available)
+             case 'u':
                   e.preventDefault();
                  if (history.length > 1) {
-                      // If currently selected is not the last, just select previous
                       if(selectedHistoryIndex > 0) {
                          selectedHistoryIndex--;
+                          const prevState = deepCopy(history[selectedHistoryIndex]);
+                          board = prevState.board;
+                          score = prevState.score;
+                          gameOver = prevState.gameOver;
+                          branchPoint = null; // Reset branching concept when going back
+                          console.log(`Undo: Reverted to history state ${selectedHistoryIndex}`);
+                          updateUI();
+                          drawGame();
                       } else {
-                         // If already at the first, can't go back further
                           console.log("Already at the beginning of history.");
-                          return;
                       }
-
-                     // If we were at the end, effectively pop the last state
-                     // No, let's just allow selecting previous state always.
-                     // history.pop(); // Remove last state if we were at the end? Maybe not needed.
-
-                     const prevState = deepCopy(history[selectedHistoryIndex]);
-                     board = prevState.board;
-                     score = prevState.score;
-                     gameOver = prevState.gameOver; // Restore game over state from that point
-                     branchPoint = null; // Undoing cancels the concept of a future branch point from here
-                     console.log(`Undo: Reverted to history state ${selectedHistoryIndex}`);
-                     updateUI();
-                     drawGame();
                  } else {
                      console.log("Cannot undo further.");
                  }
                  break;
+             // <-- NEW: Pause toggle -->
+             case 'p':
+                 e.preventDefault();
+                 if (botMode) { // Only allow pausing if bot is active
+                     isPaused = !isPaused;
+                     console.log(`Bot Paused: ${isPaused}`);
+                     updateUI(); // Update status text
+                 } else {
+                     console.log("Pause only affects Bot mode.");
+                 }
+                 break;
+             // <-- End Pause Toggle -->
         }
 
         // Combined strategy toggles (1-5)
@@ -960,13 +972,12 @@ document.addEventListener('DOMContentLoaded', () => {
              const stratName = strategyKeyMapping[e.key];
              if (combinedBotStrategies[stratName]) {
                  combinedBotStrategies[stratName].active = !combinedBotStrategies[stratName].active;
-                 // Update strategy order
                  if (combinedBotStrategies[stratName].active) {
                      if (!strategyOrder.includes(stratName)) {
-                         strategyOrder.push(stratName); // Add to end if reactivated
+                         strategyOrder.push(stratName);
                      }
                  } else {
-                      strategyOrder = strategyOrder.filter(s => s !== stratName); // Remove if deactivated
+                      strategyOrder = strategyOrder.filter(s => s !== stratName);
                  }
                  console.log(`Strategy '${stratName}' toggled ${combinedBotStrategies[stratName].active ? 'ON' : 'OFF'}. Order: ${strategyOrder.join(', ')}`);
                  updateUI();
@@ -976,15 +987,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Game Loop ---
     function gameLoop() {
-        if (botMode) {
-            executeBotMove();
-        }
-        // Drawing is now mainly event-driven (after moves)
-        // But requestAnimationFrame is good practice for potential animations later
+        executeBotMove(); // Will check botMode and isPaused internally
         requestAnimationFrame(gameLoop);
     }
 
     // --- Initialization ---
-    resetGame(); // Initial setup
+    resetGame(); // Initial setup (calls updateUI, drawGame, scrollToHistoryBottom)
     gameLoop(); // Start the loop
 });

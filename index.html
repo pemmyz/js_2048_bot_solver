@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048 Bot Solver (HTML5)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>2048 Bot Solver</h1>
+    <div class="container">
+        <div class="game-area">
+            <div id="score-area">Score: 0</div>
+            <canvas id="game-canvas" width="500" height="500"></canvas> <!-- Adjusted later by JS -->
+            <div id="status-area">
+                <div id="status-line-1">Mode: Manual | Algorithm: random</div>
+                <div id="status-line-2"></div>
+                <div id="status-line-3"></div>
+                <div id="game-over-message" style="display: none;">GAME OVER! (R: restart)</div>
+            </div>
+             <div class="controls-info">
+                Arrow keys: Move | B: Toggle Bot | A: Change Algo | R: Restart | H: Toggle History | 1-5: Toggle Combined Strats
+            </div>
+        </div>
+        <div id="history-panel">
+            <h2>History</h2>
+            <div id="history-entries">
+                <!-- History entries will be added here by JS -->
+            </div>
+            <div id="history-scrollbar-track">
+                <div id="history-scrollbar-thumb"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

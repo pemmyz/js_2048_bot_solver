@@ -1,5 +1,7 @@
 # js_2048_bot_solver
 
+Currently W.I.P. 24.04.2025
+
 ## Play it now: https://pemmyz.github.io/js_2048_bot_solver/
 
 

@@ -3,11 +3,6 @@
 ## Play it now: https://pemmyz.github.io/js_2048_bot_solver/
 
 
-## Screenshots
-
-### Game
-![Game 1](screenshots/game_1.png)
-
 # 2048_bot_solver (HTML5/JavaScript Edition)  
 🧠 A smarter, richer 2048 experience — now in the browser!
 
@@ -24,8 +19,8 @@ A feature-rich and extendable version of the classic **2048 game** built using *
 
 ## 📸 Screenshots
 
-<!-- You can add image links here -->
-<!-- ![Game 1](screenshots/game_1.png) -->
+### Game
+![Game 1](screenshots/game_1.png)
 
 ---
 

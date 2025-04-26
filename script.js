@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let draggingScrollbar = false;
     let scrollbarDragOffsetY = 0;
     let isPaused = false;
-    let isDarkMode = true; // <-- Make dark mode default
+    let isDarkMode = true; // <-- Set dark mode as default
 
     // --- AI Constants ---
     const EXPECTIMAX_DEPTH = 2; // Adjust as needed (higher is slower)
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const botAlgorithms = [
         "random", "greedy", "heuristic", "remove_small", "combined",
-        "expectimax", "mcts" // <-- NEW: Add new algorithms
+        "expectimax", "mcts"
     ];
     let currentAlgorithmIndex = 0;
     let botAlgorithm = botAlgorithms[currentAlgorithmIndex];
@@ -138,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleDarkMode() {
         isDarkMode = !isDarkMode;
-        bodyElement.classList.toggle('dark-mode', isDarkMode);
+        bodyElement.classList.toggle('dark-mode', isDarkMode); // Toggle class on body
         applyThemeColors();
         console.log(`Dark Mode: ${isDarkMode ? 'Enabled' : 'Disabled'}`);
         drawGame(); // Redraw canvas with new colors
@@ -404,7 +404,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Use active theme colors
         const bgColor = TILE_COLORS[value] || TILE_COLORS[8192]; // Fallback for very high tiles
-        const textColor = value >= (isDarkMode ? 2 : 8) ? TILE_TEXT_COLOR_LIGHT : TILE_TEXT_COLOR_DARK;
+        // Determine text color based on tile value and theme
+        const lightTextThreshold = isDarkMode ? 4 : 8; // Tiles >= this use light text
+        const textColor = value >= lightTextThreshold ? TILE_TEXT_COLOR_LIGHT : TILE_TEXT_COLOR_DARK;
+
         // Adjust font size based on number of digits
         const fontSize = value < 100 ? 45 : value < 1000 ? 35 : value < 10000 ? 30 : 25;
 
@@ -452,7 +455,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (botAlgorithm === "combined") {
             const activeStrats = strategyOrder.filter(s => combinedBotStrategies[s].active);
-            statusLine2.textContent = `Active: ${activeStrats.map(s => s.substring(0, 3)).join(', ') || 'None'}`; // Abbreviate
+            // Display full strategy names
+            statusLine2.textContent = `Active: ${activeStrats.join(', ') || 'None'}`;
             statusLine3.textContent = `(Use 1-5 to toggle)`;
         } else {
              statusLine2.textContent = `(${botMode ? 'P: Pause/Resume' : 'Use Arrows'})`;
@@ -684,46 +688,52 @@ document.addEventListener('DOMContentLoaded', () => {
             bestCornerScore = value * (GRID_SIZE * 2 - 1 - minDist) * 0.5; // Lower weight than exact corner
         }
 
+        // Penalty for having large tiles not near the corner? Maybe too complex
         return bestCornerScore;
     }
 
     // Measures how monotonic rows and columns are (tendency to increase/decrease)
+    // Higher score means more monotonic (generally preferred towards edges)
     function evalMonotonicity(currentBoard) {
-        let totalMonotonicity = 0;
-        const directions = [[0, 1], [1, 0]]; // Check right and down
+        let totals = [0, 0, 0, 0]; // up, down, left, right
 
-        for(let r=0; r<GRID_SIZE; ++r){
-            for(let c=0; c<GRID_SIZE; ++c){
-                for(let d=0; d<2; ++d){ // Iterate through directions (right, down)
-                    let currentVal = currentBoard[r][c];
-                    if (currentVal === 0) continue; // Skip empty cells
-
-                    let next_r = r + directions[d][0];
-                    let next_c = c + directions[d][1];
-
-                    // Find the next non-zero tile in that direction
-                    while (next_r >= 0 && next_r < GRID_SIZE && next_c >= 0 && next_c < GRID_SIZE) {
-                        let nextVal = currentBoard[next_r][next_c];
-                        if (nextVal !== 0) {
-                             // Penalize if the sequence decreases (or increases depending on view)
-                             // We want larger tiles towards certain edges, so reward increasing sequences
-                             if (nextVal > currentVal) {
-                                 totalMonotonicity += Math.log2(nextVal) - Math.log2(currentVal);
-                             } else if (nextVal < currentVal) {
-                                 totalMonotonicity -= Math.log2(currentVal) - Math.log2(nextVal); // Penalize harder for decrease
-                             }
-                             break; // Found next tile, stop searching in this direction
-                        }
-                        next_r += directions[d][0];
-                        next_c += directions[d][1];
-                    }
-                }
+        // Check rows (left and right)
+        for (let r = 0; r < GRID_SIZE; r++) {
+            let current = 0;
+            let next = current + 1;
+            while (next < GRID_SIZE) {
+                while (next < GRID_SIZE && currentBoard[r][next] === 0) next++;
+                if (next >= GRID_SIZE) break;
+                let currentVal = currentBoard[r][current] === 0 ? 0 : Math.log2(currentBoard[r][current]);
+                let nextVal = currentBoard[r][next] === 0 ? 0 : Math.log2(currentBoard[r][next]);
+                if (currentVal > nextVal) totals[2] += nextVal - currentVal; // Penalize left decrease
+                else if (nextVal > currentVal) totals[3] += currentVal - nextVal; // Penalize right decrease
+                current = next++;
             }
         }
-        return totalMonotonicity;
+
+        // Check columns (up and down)
+        for (let c = 0; c < GRID_SIZE; c++) {
+            let current = 0;
+            let next = current + 1;
+            while (next < GRID_SIZE) {
+                while (next < GRID_SIZE && currentBoard[next][c] === 0) next++;
+                if (next >= GRID_SIZE) break;
+                let currentVal = currentBoard[current][c] === 0 ? 0 : Math.log2(currentBoard[current][c]);
+                let nextVal = currentBoard[next][c] === 0 ? 0 : Math.log2(currentBoard[next][c]);
+                if (currentVal > nextVal) totals[0] += nextVal - currentVal; // Penalize up decrease
+                else if (nextVal > currentVal) totals[1] += currentVal - nextVal; // Penalize down decrease
+                current = next++;
+            }
+        }
+
+        // Return the maximum penalty (most non-monotonic direction) or sum?
+        // Let's sum the penalties for overall monotonicity measure (higher = more monotonic)
+        return Math.max(totals[0], totals[1]) + Math.max(totals[2], totals[3]);
     }
 
     // Measures how smooth the board is (difference between adjacent tiles)
+    // Higher score (less negative) means smoother board
     function evalSmoothness(currentBoard) {
         let smoothness = 0;
         for (let r = 0; r < GRID_SIZE; r++) {
@@ -731,24 +741,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (currentBoard[r][c] !== 0) {
                     let valueLog = Math.log2(currentBoard[r][c]);
                     // Check right neighbor
-                    if (c < GRID_SIZE - 1) {
-                        let target = currentBoard[r][c + 1];
+                    let next_c = c + 1;
+                    while (next_c < GRID_SIZE) {
+                        let target = currentBoard[r][next_c];
                         if (target !== 0) {
                             smoothness -= Math.abs(valueLog - Math.log2(target));
+                            break; // Found nearest neighbor
                         }
+                        next_c++;
                     }
                     // Check down neighbor
-                    if (r < GRID_SIZE - 1) {
-                         let target = currentBoard[r + 1][c];
+                    let next_r = r + 1;
+                     while (next_r < GRID_SIZE) {
+                         let target = currentBoard[next_r][c];
                          if (target !== 0) {
                              smoothness -= Math.abs(valueLog - Math.log2(target));
+                             break; // Found nearest neighbor
                          }
+                         next_r++;
                     }
                 }
             }
         }
-        // Smoothness is negative (lower difference = better), return its absolute value or keep negative?
-        // Let's return the negative value, so higher (less negative) is better.
         return smoothness;
     }
 
@@ -757,8 +771,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Penalizes having small tiles (value < threshold) on the board
+    // Higher score (less negative) means fewer small tiles
     function evalRemoveSmall(currentBoard, threshold = 8) {
-        return -countSmallTiles(currentBoard, threshold); // Negative score, fewer small tiles is better
+        return -countSmallTiles(currentBoard, threshold);
     }
 
     // --- Combined Heuristic Evaluation (used by AI) ---
@@ -766,15 +781,16 @@ document.addEventListener('DOMContentLoaded', () => {
         let scoreVal = 0; // Use 'scoreVal' to avoid conflict with global 'score'
         const weights = {
             empty: 2.7,
-            corner: 3.0, // Slightly higher weight for corner
+            corner: 3.0, // Weight for max tile in corner heuristic
             monotonicity: 1.0,
             smoothness: 0.1,
-            maxTile: 1.0, // Add log of max tile value
-            // scoreDelta: 0.5 // Weight for score gained (useful maybe?) - not directly available here
+            maxTile: 1.0, // Add log of max tile value itself
+            // scoreDelta: 0.5 // Could be added if passed in
         };
 
+        // Immediate check for game over state
         if (!canMoveCheckBoard(currentBoard)) {
-            return -Infinity; // Game over state is very bad
+            return -Infinity; // Extremely low score for game over
         }
 
         scoreVal += weights.empty * evalEmpty(currentBoard);
@@ -784,6 +800,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const maxTileData = evalGetMaxTile(currentBoard);
         scoreVal += weights.maxTile * (maxTileData.value > 0 ? Math.log2(maxTileData.value) : 0);
+
+        // Add current game score slightly? Maybe not ideal for lookahead.
+        // scoreVal += currentScore * 0.01;
 
         return scoreVal;
     }
@@ -825,7 +844,9 @@ document.addEventListener('DOMContentLoaded', () => {
              const simResult = simulateMove(originalBoard, direction);
              // Use the more comprehensive evaluateBoard function
              let value = evaluateBoard(simResult.board);
-             // Optionally add score delta: value += simResult.scoreDelta * some_weight;
+             // Add the score delta achieved by the move itself
+             value += simResult.scoreDelta * 0.5; // Example weight for immediate score gain
+
              if (value > bestValue) {
                  bestValue = value;
                  bestMove = direction;
@@ -844,12 +865,16 @@ document.addEventListener('DOMContentLoaded', () => {
          for (const direction of getValidMoves(originalBoard)) {
              const simResult = simulateMove(originalBoard, direction);
              let smallCount = countSmallTiles(simResult.board, threshold);
+
              if (smallCount < minSmallCount) {
                  minSmallCount = smallCount;
                  bestMove = direction;
              } else if (smallCount === minSmallCount) {
-                 // Tie-breaker: use a secondary heuristic like empty cells or max tile
-                 // For now, just prefer the first best move found or let fallback handle it
+                  // Tie-breaker: Use a secondary heuristic like the board evaluation score
+                  let currentEval = evaluateBoard(simResult.board) + simResult.scoreDelta * 0.5;
+                  // Need to store the best evaluation score for the tie-breaker comparison
+                  // This makes it slightly more complex than the initial simple version
+                  // Let's stick to the simple version for now: first move found with min small count wins.
              }
          }
          return bestMove || botRandomMove(); // Fallback
@@ -865,14 +890,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const simResult = simulateMove(originalBoard, direction);
             let currentScoreValue = 0; // Renamed to avoid conflict
 
-            // Calculate score based on active, weighted strategies
+            // Calculate score based on active, weighted strategies applied to the resulting board
             for(const stratName of strategyOrder) {
                 const strat = combinedBotStrategies[stratName];
                 if (strat.active) {
-                    currentScoreValue += strat.weight * strat.func(simResult.board); // Evaluate the resulting board
+                    currentScoreValue += strat.weight * strat.func(simResult.board);
                 }
             }
-            // Add score delta from the move itself, weighted
+            // Add score delta from the move itself, potentially weighted
             currentScoreValue += simResult.scoreDelta * 0.5; // Example weight
 
             if (currentScoreValue > bestScore) {
@@ -901,9 +926,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Score = score from this move + expected score from computer's subsequent turn
                 const currentTurnScore = simResult.scoreDelta; // Use the actual score gained
                 const nextStateScore = expectimaxSearch(simResult.board, depth - 1, false); // Computer's turn next
-                // Avoid issues if nextStateScore is -Infinity (game over)
-                let totalScore = currentTurnScore + (nextStateScore === -Infinity ? 0 : nextStateScore);
-                maxScore = Math.max(maxScore, totalScore);
+
+                // If nextStateScore is -Infinity (guaranteed loss), this path is bad
+                if (nextStateScore === -Infinity) {
+                    // We might still be forced to take it if all moves lead to loss
+                    // Assign a very low score but maybe slightly better than pure -Infinity?
+                    // Or just let max handle it. Let's keep it simple:
+                     maxScore = Math.max(maxScore, -Infinity); // Or evaluateBoard(simResult.board)?
+                } else {
+                    maxScore = Math.max(maxScore, currentTurnScore + nextStateScore);
+                }
+
             }
              // Handle cases where all moves lead to immediate game over (-Infinity)
             return maxScore === -Infinity ? evaluateBoard(currentBoard) : maxScore;
@@ -915,26 +948,33 @@ document.addEventListener('DOMContentLoaded', () => {
             const numEmpty = emptyCells.length;
 
             if (numEmpty === 0) {
-                return evaluateBoard(currentBoard); // Should be caught by canMoveCheck earlier, but safety
+                // This state should have been caught by canMoveCheckBoard earlier
+                return evaluateBoard(currentBoard);
             }
 
-            let totalWeight = 0;
+            let totalWeightedScore = 0;
+            // Iterate through each empty cell
             for (const cell of emptyCells) {
                 // Consider placing '2' (90% probability)
                 const boardWith2 = deepCopy(currentBoard);
                 boardWith2[cell.r][cell.c] = 2;
-                expectedScore += 0.9 * expectimaxSearch(boardWith2, depth - 1, true); // Player's turn next
-                totalWeight += 0.9;
+                let score2 = expectimaxSearch(boardWith2, depth - 1, true); // Player's turn next
+                if (score2 !== -Infinity) totalWeightedScore += 0.9 * score2;
+                else totalWeightedScore += 0.9 * evaluateBoard(boardWith2); // Use heuristic if next state is game over
+
 
                 // Consider placing '4' (10% probability)
                 const boardWith4 = deepCopy(currentBoard);
                 boardWith4[cell.r][cell.c] = 4;
-                expectedScore += 0.1 * expectimaxSearch(boardWith4, depth - 1, true); // Player's turn next
-                totalWeight += 0.1;
+                let score4 = expectimaxSearch(boardWith4, depth - 1, true); // Player's turn next
+                if (score4 !== -Infinity) totalWeightedScore += 0.1 * score4;
+                 else totalWeightedScore += 0.1 * evaluateBoard(boardWith4); // Use heuristic if next state is game over
+
             }
 
             // Average the expected scores over all possibilities
-            return expectedScore / numEmpty; // totalWeight should equal numEmpty
+            // Each empty cell contributes (0.9 * score_after_2 + 0.1 * score_after_4)
+            return totalWeightedScore / numEmpty;
         }
     }
 
@@ -950,11 +990,17 @@ document.addEventListener('DOMContentLoaded', () => {
              const simResult = simulateMove(originalBoard, direction);
              // Calculate score: score from this move + expected score of the state *after* this move
              const currentTurnScore = simResult.scoreDelta;
-             // Start the recursive search from the state AFTER the move, depth-1, computer's turn
-             const nextStateExpectedScore = expectimaxSearch(simResult.board, EXPECTIMAX_DEPTH, false); // Depth starts full here, decreases inside
+             // Start the recursive search from the state AFTER the move, depth starts full, computer's turn
+             const nextStateExpectedScore = expectimaxSearch(simResult.board, EXPECTIMAX_DEPTH, false);
 
-             // Avoid issues if next state is game over
-             const totalScore = currentTurnScore + (nextStateExpectedScore === -Infinity ? 0 : nextStateExpectedScore);
+             let totalScore;
+             if (nextStateExpectedScore === -Infinity) {
+                  // If the computer's turn guarantees a loss, evaluate the current resulting state instead
+                  // This might overestimate the value, but avoids propagating -Infinity if forced move
+                  totalScore = evaluateBoard(simResult.board);
+             } else {
+                 totalScore = currentTurnScore + nextStateExpectedScore;
+             }
 
              if (totalScore > bestScore) {
                  bestScore = totalScore;
@@ -962,9 +1008,10 @@ document.addEventListener('DOMContentLoaded', () => {
              }
         }
         console.log(`Expectimax best score: ${bestScore.toFixed(2)} for move ${bestMove}`);
-        // Fallback to first valid move if all scores end up -Infinity (e.g., forced loss)
+        // Fallback to first valid move if all scores end up -Infinity or calculation fails
         return bestMove || validMoves[0];
     }
+
 
     // --- MCTS Bot ---
     class MCTSNode {
@@ -986,7 +1033,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return Infinity; // Prioritize unvisited nodes
             }
             if (!this.parent || this.parent.visits === 0) {
-                // Should only happen for root or if parent somehow wasn't visited (error)
+                // Root node or error case
                 return this.score / this.visits; // Just return average score
             }
              // UCB1 = Average Score (Exploitation) + Exploration Bonus
@@ -1029,45 +1076,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Simulates a random playout from the current node's state until a terminal state or depth limit
         simulateRollout() {
-             // Start rollout from the state *after* the computer's random tile placement
+             // Start rollout from the state represented by this node.
+             // The *first* step is the computer adding a random tile.
              let currentState = deepCopy(this.state);
              let rolloutScore = 0; // Score accumulated *during* the rollout itself
              let depth = 0;
 
-             // 1. Simulate Computer's Random Tile Placement (if possible)
-             let emptyCells = getEmptyCells(currentState);
-             if (emptyCells.length > 0) {
-                 let { r, c } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-                 currentState[r][c] = Math.random() < 0.1 ? 4 : 2;
-             } else {
-                  // If no empty cells, the state after the player move was terminal
-                  return evaluateBoard(this.state); // Evaluate the state *before* trying to add tile
-             }
+             // Simulate game playing out randomly
+             while(depth < MCTS_ROLLOUT_DEPTH) {
+                 // 1. Simulate Computer's Random Tile Placement (if possible)
+                 let emptyCells = getEmptyCells(currentState);
+                 if (emptyCells.length > 0) {
+                     let { r, c } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                     currentState[r][c] = Math.random() < 0.1 ? 4 : 2;
+                 } else {
+                      // Game ended because computer couldn't place a tile
+                      break;
+                 }
 
+                 // 2. Check if player has moves after computer's placement
+                 if (!canMoveCheckBoard(currentState)) {
+                     break; // Game ended because player has no moves
+                 }
 
-             // 2. Simulate Player moves randomly until terminal or depth limit
-             while(depth < MCTS_ROLLOUT_DEPTH && canMoveCheckBoard(currentState)) {
+                 // 3. Simulate Player making a random valid move
                   const validMoves = getValidMoves(currentState);
-                  if (validMoves.length === 0) break; // Should be caught by canMoveCheck, but safety
+                  // This check should be redundant due to canMoveCheckBoard, but safety first
+                  if (validMoves.length === 0) break;
 
                   const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
                   const simResult = simulateMove(currentState, randomMove);
                   currentState = simResult.board; // Update state for next iteration
                   rolloutScore += simResult.scoreDelta; // Accumulate score gained in rollout
 
-                  // Simulate computer's random tile for the *next* step of the rollout
-                  emptyCells = getEmptyCells(currentState);
-                  if (emptyCells.length > 0) {
-                      let { r, c } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-                      currentState[r][c] = Math.random() < 0.1 ? 4 : 2;
-                  } else {
-                       break; // No space left, rollout ends
-                  }
                   depth++;
              }
 
              // Return evaluation of the final state reached + score accumulated during rollout
-             // Weight the final heuristic evaluation less than the score actually achieved? Optional.
              return rolloutScore + evaluateBoard(currentState);
         }
 
@@ -1111,6 +1156,8 @@ document.addEventListener('DOMContentLoaded', () => {
                  } else {
                      // Expansion failed (shouldn't happen if untriedMoves > 0), maybe log error?
                      console.warn("MCTS Expansion failed unexpectedly.");
+                     // Stay at the current node for simulation? Or choose another selection?
+                     // Staying at current node is safer for now.
                  }
              }
 
@@ -1129,6 +1176,7 @@ document.addEventListener('DOMContentLoaded', () => {
          for (const move of getValidMoves(root.state)) {
             if (root.children[move]) { // Check if this move was explored (has a child node)
                  const childNode = root.children[move];
+                  // Optional: Log stats for debugging
                   // console.log(`MCTS Move ${move}: Visits=${childNode.visits}, AvgScore=${(childNode.score / childNode.visits || 0).toFixed(2)}`);
                  if (childNode.visits > maxVisits) {
                      maxVisits = childNode.visits;
@@ -1144,11 +1192,13 @@ document.addEventListener('DOMContentLoaded', () => {
              console.log(`MCTS best move (most visits): ${bestMove} (${maxVisits} visits)`);
          } else {
              console.warn("MCTS: No move selected (no children explored?). Falling back to random.");
-             bestMove = botRandomMove(); // Fallback if something went wrong
+             // Fallback: choose the move with the highest average score if visits are zero? Or just random.
+             bestMove = botRandomMove();
          }
 
          return bestMove;
     }
+
 
     // --- Bot Execution ---
     function executeBotMove() {
@@ -1199,8 +1249,6 @@ document.addEventListener('DOMContentLoaded', () => {
                  drawGame();
             } else {
                  // If move returns false, it means the chosen move was invalid *at the time of execution*
-                 // This might happen if the state changed between thinking and moving (unlikely here)
-                 // or if the bot chose a move that led to no change (e.g., pushing into a wall)
                  console.warn(`Bot (${botAlgorithm}) chose move ${chosenMove}, but it resulted in no change.`);
                  // Check for game over again, as the failed move might be the only option
                  if (!gameOver && !canMoveCheck()) {
@@ -1334,8 +1382,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Initialization ---
-    if (isDarkMode) bodyElement.classList.add('dark-mode'); // <-- ADD THIS LINE
-    applyThemeColors(); // Apply initial theme colors (light by default)
+    if (isDarkMode) bodyElement.classList.add('dark-mode'); // Apply dark mode class initially if needed
+    applyThemeColors(); // Apply initial theme colors (will be dark if isDarkMode=true)
     resetGame(); // Setup initial board, history, score, etc. (calls updateUI, drawGame, etc.)
     gameLoop(); // Start the main game loop
 

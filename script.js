@@ -1301,7 +1301,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  console.log(`Bot Mode: ${botMode}`);
                  updateUI();
                  break;
-            case 'a': // Cycle Bot Algorithm
+            case 'g': // Cycle Bot Algorithm // <<< CHANGED FROM 'a'
                  e.preventDefault();
                  currentAlgorithmIndex = (currentAlgorithmIndex + 1) % botAlgorithms.length;
                  botAlgorithm = botAlgorithms[currentAlgorithmIndex];
@@ -1345,7 +1345,7 @@ document.addEventListener('DOMContentLoaded', () => {
                      console.log("Pause/Resume only affects Bot mode.");
                  }
                  break;
-             case 'd': // Toggle Dark Mode
+             case 'f': // Toggle Dark Mode // <<< CHANGED FROM 'd'
                  e.preventDefault();
                  toggleDarkMode();
                  break;
@@ -1390,7 +1390,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update controls info text initially
      const controlsInfoDiv = document.querySelector('.controls-info');
      if (controlsInfoDiv) {
-         controlsInfoDiv.textContent = 'Arrows/WASD: Move | B: Bot | A: Algo | R: Reset | H: History | U: Undo | P: Pause Bot | D: Dark Mode | 1-5: Cmb Strats';
+         controlsInfoDiv.textContent = 'Arrows/WASD: Move | B: Bot | G: Algo | R: Reset | H: History | U: Undo | P: Pause Bot | F: Dark Mode | 1-5: Cmb Strats'; // <<< CHANGED A to G, D to F
      }
 
 }); // End DOMContentLoaded
